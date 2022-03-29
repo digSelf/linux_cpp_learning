@@ -276,7 +276,7 @@ int rbtree_insert(t_rbtree *tree, USER_KEY_TYPE key) {
 }
 
 // 搜索给定的key，返回对应的节点
-t_rbtree_node *search(t_rbtree *tree, USER_KEY_TYPE key) {
+t_rbtree_node *rbtree_search(t_rbtree *tree, USER_KEY_TYPE key) {
     if (nullptr == tree || tree->nil == tree->root)
         return nullptr;
 
@@ -328,6 +328,9 @@ int main() {
         std::printf("%d ", key);
     }
     std::printf("\n");
+
+    std::printf("%d %d\n", rbtree_search(&tree, 13) != nullptr, 
+                           rbtree_search(&tree, 5) != nullptr);
 
     return 0;
 }
