@@ -275,6 +275,25 @@ int rbtree_insert(t_rbtree *tree, USER_KEY_TYPE key) {
     return 0;
 }
 
+// 搜索给定的key，返回对应的节点
+t_rbtree_node *search(t_rbtree *tree, USER_KEY_TYPE key) {
+    if (nullptr == tree || tree->nil == tree->root)
+        return nullptr;
+
+    t_rbtree_node *cursor = tree->root;
+    while (cursor) {
+        if (key < cursor->key) {
+            cursor = cursor->entry.left;
+        } else if (key > cursor->key) {
+            cursor = cursor->entry.right;
+        } else {
+            return cursor;
+        }
+    }
+
+    return nullptr;
+}
+
 // 中序遍历
 int inorder_traversal(t_rbtree *tree, t_rbtree_node *root, vector<int>& result) {
     if (nullptr == tree || nullptr == root)
