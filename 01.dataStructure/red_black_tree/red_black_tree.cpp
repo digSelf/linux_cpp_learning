@@ -39,6 +39,9 @@ using std::vector;
 
 #define RBTREE_NODE_CLR_RED     0
 #define RBTREE_NODE_CLR_BCK     1
+#define RBTREE_NODE_CLR_DBL     2       // 双重黑
+
+#define SAFE_DELETE_NODE(node) {if (node) {delete node; node = nullptr; }}
 
 typedef int USER_KEY_TYPE;
 
@@ -176,7 +179,7 @@ int rbtree_flip_color(t_rbtree_node *node) {
 // 每条路径上的黑色节点的数量等于调整之后的每条路径上的黑色节点的数量。在应对LR, LL, RL, RR的旋转的时候，只需要简记为：当第一个字母
 // 为L的时候，一定会以祖父节点作为轴心做一个大右旋；当第一个字母为R的时候，一定会以祖父节点作为轴心做一个大左旋；而在每个情况里面，还需
 // 判断一下在大右旋/大左旋前面是否要有小左旋（LR类型）/小右旋（RL类型）
-void rbtree_insert_adjustment(t_rbtree *tree, t_rbtree_node *insertion) {
+void rbtree_insert_maintain(t_rbtree *tree, t_rbtree_node *insertion) {
     if (nullptr == tree || tree->nil == insertion)
         return;
     
@@ -298,14 +301,14 @@ int rbtree_insert(t_rbtree *tree, USER_KEY_TYPE key) {
     }
     
     // 开始调整
-    rbtree_insert_adjustment(tree, new_node);
+    rbtree_insert_maintain(tree, new_node);
     return 0;
 }
 
 // 搜索给定的key，返回对应的节点
 t_rbtree_node *rbtree_search(t_rbtree *tree, USER_KEY_TYPE key) {
     if (nullptr == tree || tree->nil == tree->root)
-        return nullptr;
+        return tree->nil;
 
     t_rbtree_node *cursor = tree->root;
     while (cursor) {
@@ -318,7 +321,7 @@ t_rbtree_node *rbtree_search(t_rbtree *tree, USER_KEY_TYPE key) {
         }
     }
 
-    return nullptr;
+    return tree->nil;
 }
 
 /*
@@ -373,6 +376,140 @@ t_rbtree_node *rbtree_search(t_rbtree *tree, USER_KEY_TYPE key) {
 3. 如果兄弟节点是红色的，先小右/左旋转，然后将新根节点变为黑色，原根节点变为红色，转为双黑节点的兄弟节点是黑色的情况。
 */
 
+// 找到指定节点的前驱节点
+t_rbtree_node *predecessor(t_rbtree *tree, t_rbtree_node *node) {
+    t_rbtree_node *cursor = node->entry.left;
+
+    while (cursor != tree->nil) {
+        cursor = cursor->entry.right;
+    }
+
+    return cursor;
+}
+
+int has_red_child(t_rbtree_node *node) {
+    if (nullptr == node) {
+        return -1;
+    }
+
+    return node->entry.left->entry.color == RBTREE_NODE_CLR_RED || 
+           node->entry.right->entry.color == RBTREE_NODE_CLR_RED;
+}
+
+int rbtree_erase_maintain(t_rbtree *tree, t_rbtree_node *node) {
+    if (node->entry.left->entry.color != RBTREE_NODE_CLR_DBL || node->entry.right->entry.color != RBTREE_NODE_CLR_DBL) {
+        return 0;
+    } // 没有双重黑节点，无需调整
+
+    if (has_red_child(node)) {
+        // 此时有双重黑节点，且双重黑节点的兄弟节点是红色
+        // 旋转完的原根节点变为红色，新根节点改为黑色
+        node->entry.color = RBTREE_NODE_CLR_RED;
+        bool is_right_rotate = false;
+        if (node->entry.left->entry.color == RBTREE_NODE_CLR_RED) {
+            // 如果左子树是红色节点（即：左红兄弟节点），需要小右旋
+            rbtree_right_rotate(tree, node);
+            is_right_rotate = true;
+        } else {
+            rbtree_left_rotate(tree, node);
+        }
+        // 此时，原根节点是新根节点的孩子，因此直接通过parent就能寻址到新根节点的位置
+        node->entry.parent->entry.color = RBTREE_NODE_CLR_BCK;
+
+        if (is_right_rotate)
+            return rbtree_erase_maintain(tree, node->entry.right);
+        else 
+            return rbtree_erase_maintain(tree, node->entry.left);
+    } 
+    
+    if ((node->entry.left->entry.color == RBTREE_NODE_CLR_DBL && !has_red_child(node->entry.right)) ||
+        (node->entry.right->entry.color == RBTREE_NODE_CLR_DBL && !has_red_child(node->entry.left))) {
+        // 自己和兄弟节点均减一重黑；父节点加一重黑
+        node->entry.left->entry.color -= RBTREE_NODE_CLR_BCK;
+        node->entry.right->entry.color -= RBTREE_NODE_CLR_BCK;
+
+        node->entry.color += RBTREE_NODE_CLR_BCK;
+        return 0;
+    }
+
+    // 判断双重黑的节点在哪个分支，从而可以获知其兄弟节点是在另一分支
+    if (node->entry.left->entry.color == RBTREE_NODE_CLR_DBL) {
+        if (node->entry.right->entry.right->entry.color != RBTREE_NODE_CLR_RED) {
+            // 原根的颜色变为红色
+            node->entry.right->entry.color = RBTREE_NODE_CLR_RED;
+            rbtree_right_rotate(tree, node->entry.right);
+
+            // 新根变为黑色
+
+        }
+
+        rbtree_left_rotate(tree, node);
+        // 新根节点变为原根节点的颜色
+        
+    } else {
+
+    }
+
+    node->entry.left->entry.color = node->entry.right->entry.color = RBTREE_NODE_CLR_BCK;
+    
+    return 0;
+}
+
+// 删除指定节点
+int erase(t_rbtree *tree, USER_KEY_TYPE key) {
+    if (nullptr == tree->root || tree->nil == tree->root)
+        return -1;     // 当前没有要删除的节点值 
+
+    // 开始查找要删除的位置
+    t_rbtree_node *cursor = rbtree_search(tree, key);
+    if (cursor == tree->nil)
+        return -1;  // 当前没有要删除的节点的值
+
+    // 先处理度为0或者1的节点，包含了三种情况
+    t_rbtree_node *temp_node = tree->nil;
+    t_rbtree_node *waiting_del = tree->nil;
+
+    // 先判断当前是否是度为2的情况，如果是的话，则转为度为1的情况
+    if (cursor->entry.left == tree->nil || cursor->entry.right == tree->nil) {
+        // 度为0或1的情况
+        waiting_del = cursor;
+    } else {
+        // 待删除节点是度为2的情况
+        waiting_del = predecessor(tree, cursor);
+    }
+
+    // 拿到其非空孩子分支
+    temp_node = (waiting_del->entry.left != tree->nil) ? waiting_del->entry.left : waiting_del->entry.right;
+    // 将待删除的节点的颜色加到其孩子节点，如果删除的是红色，其孩子的节点的颜色不变（因为定义红色值为0）；否则变为双重黑色
+    temp_node->entry.color += waiting_del->entry.color;
+
+    // 从当前的红黑树中将该节点摘除，注意是双链表，因此需要修改两个指针
+    temp_node->entry.parent = waiting_del->entry.parent;
+    if (waiting_del->entry.parent == tree->nil) {
+        // 删除的是根节点
+        tree->root = temp_node;
+    } else if (waiting_del->entry.parent->entry.left == waiting_del) {
+        // 当前要删除的节点是左孩子
+        waiting_del->entry.parent->entry.left = temp_node;
+    } else {
+        // 当前要删除的节点是右孩子
+        waiting_del->entry.parent->entry.right = temp_node;
+    }
+
+    if (waiting_del != cursor) {
+        // 证明删除的是度为2的节点，因此要使用前驱节点覆盖掉当前节点保存的值即可
+        // 此时，cursor是原来的要删除的节点；waiting_del保存的是cursor的前驱节点
+        cursor->key = waiting_del->key;
+    }
+
+    SAFE_DELETE_NODE(waiting_del);
+
+    // 如果具有双重黑的话，进行调整
+    rbtree_erase_maintain(tree, temp_node);
+
+    tree->root->entry.color = RBTREE_NODE_CLR_BCK;
+    return 0;
+}
 
 // 中序遍历
 int inorder_traversal(t_rbtree *tree, t_rbtree_node *root, vector<int>& result) {
@@ -409,8 +546,8 @@ int main() {
     }
     std::printf("\n");
 
-    std::printf("%d %d\n", rbtree_search(&tree, 13) != nullptr, 
-                           rbtree_search(&tree, 5) != nullptr);
+    std::printf("%d %d\n", rbtree_search(&tree, 13) != tree.nil, 
+                           rbtree_search(&tree, 5) != tree.nil);
 
     return 0;
 }
